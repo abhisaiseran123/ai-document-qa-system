@@ -1,4 +1,4 @@
-from langchain_ollama import ChatOllama
+from langchain_groq import ChatGroq
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 
@@ -18,18 +18,10 @@ Answer:"""
 
 
 def _format_docs(docs) -> str:
-    """Combine the retrieved chunks into one text block for the prompt."""
     return "\n\n---\n\n".join(doc.page_content for doc in docs)
 
 
 def answer_question(doc_id: str, question: str):
-    """
-    Full RAG flow for one question:
-    1. Embed the question and search ChromaDB for similar chunks
-    2. Stuff those chunks into a prompt
-    3. Ask the LLM to answer using ONLY that context
-    Returns: (answer_text, list_of_source_chunks)
-    """
     vectorstore = get_vectorstore(doc_id)
     retriever = vectorstore.as_retriever(search_kwargs={"k": settings.TOP_K})
 
@@ -41,9 +33,9 @@ def answer_question(doc_id: str, question: str):
     context_text = _format_docs(retrieved_docs)
 
     prompt = ChatPromptTemplate.from_template(PROMPT_TEMPLATE)
-    llm = ChatOllama(
+    llm = ChatGroq(
         model=settings.LLM_MODEL,
-        base_url=settings.OLLAMA_BASE_URL,
+        api_key=settings.GROQ_API_KEY,
         temperature=0,
     )
 
