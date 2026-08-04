@@ -7,6 +7,8 @@ class Settings:
     # --- Groq (cloud LLM) ---
     GROQ_API_KEY: str = os.getenv("GROQ_API_KEY", "")
     GOOGLE_API_KEY: str = os.getenv("GOOGLE_API_KEY", "")
+    QDRANT_URL: str = os.getenv("QDRANT_URL", "")
+    QDRANT_API_KEY: str = os.getenv("QDRANT_API_KEY", "")
     LLM_MODEL: str = os.getenv("LLM_MODEL", "llama-3.1-8b-instant")
 
     # --- Embeddings (local, free, no API needed) ---
