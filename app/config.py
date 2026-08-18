@@ -9,7 +9,7 @@ class Settings:
     GOOGLE_API_KEY: str = os.getenv("GOOGLE_API_KEY", "")
     QDRANT_URL: str = os.getenv("QDRANT_URL", "")
     QDRANT_API_KEY: str = os.getenv("QDRANT_API_KEY", "")
-    LLM_MODEL: str = os.getenv("LLM_MODEL", "llama-3.1-8b-instant")
+    LLM_MODEL: str = os.getenv("LLM_MODEL", "openai/gpt-oss-20b")
 
     # --- Embeddings (local, free, no API needed) ---
     EMBEDDING_MODEL: str = os.getenv("EMBEDDING_MODEL", "gemini-embedding-001")
