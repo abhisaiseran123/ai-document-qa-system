@@ -1,7 +1,8 @@
 """
 AI Document Assistant -- redesigned frontend.
 Functionality is UNCHANGED from before: upload a PDF/TXT via POST /upload,
-ask questions via POST /ask. Only the visual design changed.
+ask questions via POST /ask. Only the visual design changed, and the
+Q&A now persists as a real chat history instead of replacing the last answer.
 
 Signature element: a rotating 3D stack of pages with a glowing scan-line
 sweeping through them (Three.js, loaded via CDN inside a components.html
@@ -11,7 +12,7 @@ this app actually does.
 import streamlit as st
 import streamlit.components.v1 as components
 import requests
-import time
+import html as html_lib
 
 API_BASE = "https://ai-document-qa-system-5fd2.onrender.com"
 
@@ -56,15 +57,12 @@ h1, h2, h3, .hero-title {
     background: #22D3C9; box-shadow: 0 0 8px #22D3C9;
 }
 
-/* Glass-surface panels -- deliberately NOT identical rounded cards with
-   the same shadow; differentiated by a hairline border that glows on
-   focus/hover within, not decoration on the container itself. */
+/* Glass-surface panels */
 div[data-testid="stVerticalBlockBorderWrapper"] {
     background: rgba(20, 25, 32, 0.6) !important;
     border: 1px solid #262C36 !important;
     border-radius: 10px !important;
 }
-
 div[data-testid="stVerticalBlockBorderWrapper"] p,
 div[data-testid="stVerticalBlockBorderWrapper"] label,
 div[data-testid="stVerticalBlockBorderWrapper"] span {
@@ -80,15 +78,71 @@ div[data-testid="stFileUploaderDropzone"]:hover {
     border-color: #22D3C9 !important;
 }
 
-div[data-testid="stTextInput"] input {
-    background: #10141B !important;
-    border: 1px solid #262C36 !important;
-    color: #EDEFF2 !important;
-    border-radius: 8px !important;
+/* Chat bubbles -- ChatGPT/Claude style: user right-aligned, AI left-aligned */
+.msg-row { display: flex; margin-bottom: 12px; }
+.msg-row.user { justify-content: flex-end; }
+.msg-row.assistant { justify-content: flex-start; }
+.bubble {
+    max-width: 75%;
+    padding: 12px 16px;
+    border-radius: 14px;
+    font-size: 14.5px;
+    line-height: 1.55;
 }
-div[data-testid="stTextInput"] input:focus {
+.bubble.user {
+    background: #22D3C9;
+    color: #0A0E14;
+    border-bottom-right-radius: 4px;
+}
+.bubble.assistant {
+    background: rgba(20, 25, 32, 0.8);
+    color: #EDEFF2;
+    border: 1px solid #262C36;
+    border-bottom-left-radius: 4px;
+}
+
+/* Chat input -- pill shape, cyan glow, no red anywhere */
+div[data-testid="stChatInput"] {
+    border-radius: 26px !important;
+}
+div[data-testid="stChatInput"] > div {
+    border-radius: 26px !important;
+    background: #10141B !important;
+}
+div[data-testid="stChatInput"] textarea {
+    background: #10141B !important;
+    border: 1.5px solid #262C36 !important;
+    color: #EDEFF2 !important;
+    border-radius: 26px !important;
+    outline: none !important;
+    animation: pulseGlow 2.6s ease-in-out infinite;
+}
+div[data-testid="stChatInput"] textarea:focus {
+    animation: none;
     border-color: #22D3C9 !important;
-    box-shadow: 0 0 0 3px rgba(34, 211, 201, 0.12) !important;
+    box-shadow: 0 0 0 3px rgba(34, 211, 201, 0.15) !important;
+    outline: none !important;
+}
+div[data-testid="stChatInputSubmitButton"] button {
+    background: #22D3C9 !important;
+}
+@keyframes pulseGlow {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(34,211,201,0.0); border-color: #262C36; }
+    50%      { box-shadow: 0 0 0 4px rgba(34,211,201,0.12); border-color: rgba(34,211,201,0.6); }
+}
+
+/* Thinking indicator dots, shown in an assistant-style bubble while waiting */
+.thinking-dots { display: flex; gap: 4px; padding: 4px 2px; }
+.thinking-dots span {
+    width: 7px; height: 7px; border-radius: 50%;
+    background: #22D3C9;
+    animation: bounce 1.2s infinite ease-in-out;
+}
+.thinking-dots span:nth-child(2) { animation-delay: 0.15s; }
+.thinking-dots span:nth-child(3) { animation-delay: 0.3s; }
+@keyframes bounce {
+    0%, 60%, 100% { transform: translateY(0); opacity: 0.5; }
+    30% { transform: translateY(-5px); opacity: 1; }
 }
 
 .stButton > button {
@@ -110,13 +164,6 @@ div[data-testid="stNotification"] { border-radius: 8px !important; }
 .doc-status {
     font-size: 12.5px; color: #22D3C9; margin-top: 6px;
     display: flex; align-items: center; gap: 6px;
-}
-
-.answer-box {
-    background: rgba(34, 211, 201, 0.05);
-    border-left: 2px solid #22D3C9;
-    padding: 14px 16px; border-radius: 6px;
-    color: #EDEFF2; line-height: 1.6; margin-top: 10px;
 }
 
 .app-footer {
@@ -172,7 +219,6 @@ def render_3d_hero():
     pageGroup.rotation.x = 0.15;
     scene.add(pageGroup);
 
-    // Glowing scan-line that sweeps through the page stack
     const lineGeo = new THREE.PlaneGeometry(2.6, 0.035);
     const lineMat = new THREE.MeshBasicMaterial({
         color: 0x22D3C9, transparent: true, opacity: 0.9
@@ -209,11 +255,13 @@ st.markdown('<div class="hero-sub">Upload a document. Ask it anything. Answers a
 st.write("")
 
 # ============================================================================
-# SESSION STATE (unchanged logic)
+# SESSION STATE
 # ============================================================================
 if "doc_id" not in st.session_state:
     st.session_state.doc_id = None
     st.session_state.filename = None
+if "messages" not in st.session_state:
+    st.session_state.messages = []  # [{"role": "user"/"assistant", "content": str}]
 
 # ============================================================================
 # UPLOAD PANEL
@@ -233,6 +281,7 @@ with upload_panel:
                     data = r.json()
                     st.session_state.doc_id = data["doc_id"]
                     st.session_state.filename = data["filename"]
+                    st.session_state.messages = []  # fresh document -> fresh conversation
                     st.success(f"Indexed '{data['filename']}' — {data['num_chunks']} chunks ready.")
                 except requests.exceptions.RequestException as e:
                     try:
@@ -247,33 +296,67 @@ with upload_panel:
 st.write("")
 
 # ============================================================================
-# ASK PANEL
+# CHAT PANEL -- previous questions and answers stay visible
 # ============================================================================
-ask_panel = st.container(border=True)
-with ask_panel:
-    st.markdown('<div class="panel-label"><span class="dot"></span>Ask</div>', unsafe_allow_html=True)
-    question = st.text_input("Ask anything about the uploaded document...", label_visibility="collapsed", placeholder="Ask anything about the uploaded document...")
+st.markdown('<div class="panel-label"><span class="dot"></span>Ask</div>', unsafe_allow_html=True)
 
-    if st.button("Ask AI", key="ask_btn"):
-        if not st.session_state.doc_id:
-            st.warning("Upload a document first.")
-        elif not question.strip():
-            st.warning("Type a question first.")
-        else:
-            with st.spinner("Thinking..."):
-                try:
-                    start = time.time()
-                    r = requests.post(f"{API_BASE}/ask", json={"doc_id": st.session_state.doc_id, "question": question})
-                    r.raise_for_status()
-                    elapsed = time.time() - start
-                    data = r.json()
-                    st.markdown(f'<div class="answer-box">{data["answer"]}</div>', unsafe_allow_html=True)
-                    st.caption(f"{elapsed:.1f}s")
-                except requests.exceptions.RequestException as e:
-                    try:
-                        detail = r.json().get("detail", "Failed to get answer")
-                    except Exception:
-                        detail = f"Failed to get answer ({e})."
-                    st.error(detail)
+import html as html_lib
+
+if "pending_question" not in st.session_state:
+    st.session_state.pending_question = None
+
+for msg in st.session_state.messages:
+    # Content is HTML-escaped before insertion, so it always renders as
+    # plain text -- never as literal tags, and never executes anything
+    # even if the message happens to contain < > or quote characters.
+    safe_content = html_lib.escape(msg["content"]).replace("\n", "<br>")
+    st.markdown(f"""
+        <div class="msg-row {msg['role']}">
+            <div class="bubble {msg['role']}">{safe_content}</div>
+        </div>
+    """, unsafe_allow_html=True)
+
+# If there's a question waiting to be answered, show a "thinking" bubble
+# immediately, then make the actual API call. This runs on the FOLLOWING
+# script run after the question was submitted (see below) -- that's what
+# makes the question itself appear on screen right away, instead of only
+# showing once the full answer is ready.
+if st.session_state.pending_question:
+    st.markdown("""
+        <div class="msg-row assistant">
+            <div class="bubble assistant">
+                <div class="thinking-dots"><span></span><span></span><span></span></div>
+            </div>
+        </div>
+    """, unsafe_allow_html=True)
+
+    q = st.session_state.pending_question
+    st.session_state.pending_question = None
+
+    if not st.session_state.doc_id:
+        answer = "Please upload a document first."
+    else:
+        try:
+            r = requests.post(f"{API_BASE}/ask", json={"doc_id": st.session_state.doc_id, "question": q})
+            r.raise_for_status()
+            data = r.json()
+            answer = data["answer"]
+        except requests.exceptions.RequestException as e:
+            try:
+                detail = r.json().get("detail", "Failed to get answer")
+            except Exception:
+                detail = f"Failed to get answer ({e})."
+            answer = f"⚠️ {detail}"
+
+    st.session_state.messages.append({"role": "assistant", "content": answer})
+    st.rerun()
+
+typed_question = st.chat_input("Ask anything about the uploaded document...")
+if typed_question:
+    # Append the question and rerun IMMEDIATELY -- this is what makes it
+    # show up on screen right away, before we ever call the backend.
+    st.session_state.messages.append({"role": "user", "content": typed_question})
+    st.session_state.pending_question = typed_question
+    st.rerun()
 
 st.markdown('<div class="app-footer">FastAPI · LangChain · Qdrant · Groq · Streamlit</div>', unsafe_allow_html=True)
