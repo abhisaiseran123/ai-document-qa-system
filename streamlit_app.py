@@ -272,23 +272,42 @@ with upload_panel:
     uploaded_file = st.file_uploader("Drag & drop a PDF or TXT", type=["pdf", "txt"], label_visibility="collapsed")
 
     if uploaded_file is not None:
+
         if st.button("Upload & Process", key="upload_btn"):
             with st.spinner("Reading and indexing your document..."):
                 try:
-                    files = {"file": (uploaded_file.name, uploaded_file.getvalue())}
-                    r = requests.post(f"{API_BASE}/upload", files=files)
+                    files = {
+                        "file": (
+                            uploaded_file.name,
+                            uploaded_file.getvalue(),
+                            uploaded_file.type
+                        )
+                    }
+
+                    r = requests.post(
+                        f"{API_BASE}/upload",
+                        files=files,
+                        timeout=180
+                    )
+
+                    st.write("DEBUG STATUS:", r.status_code)
+                    st.write("DEBUG RESPONSE:", r.text)
+
                     r.raise_for_status()
+
                     data = r.json()
+
                     st.session_state.doc_id = data["doc_id"]
                     st.session_state.filename = data["filename"]
-                    st.session_state.messages = []  # fresh document -> fresh conversation
-                    st.success(f"Indexed '{data['filename']}' — {data['num_chunks']} chunks ready.")
+                    st.session_state.messages = []
+
+                    st.success(
+                        f"Indexed '{data['filename']}' — "
+                        f"{data['num_chunks']} chunks ready."
+                    )
+
                 except requests.exceptions.RequestException as e:
-                    try:
-                        detail = r.json().get("detail", "Upload failed")
-                    except Exception:
-                        detail = f"Upload failed ({e}). If the server was asleep, try again in a moment."
-                    st.error(detail)
+                    st.error(f"Upload request failed: {e}")
 
     if st.session_state.doc_id:
         st.markdown(f'<div class="doc-status">● Active document: {st.session_state.filename}</div>', unsafe_allow_html=True)
